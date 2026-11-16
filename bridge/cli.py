@@ -94,7 +94,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     src = str(args.source)
     is_camera = src.isdigit()
-    capture = cv2.VideoCapture(int(src) if is_camera else src)
+    if is_camera and sys.platform == "win32":
+        # DirectShow first: virtual cameras such as Camo can open through Windows' default backend
+        # (Media Foundation) and then deliver no frames. Camera numbers match scripts/camera_test.py.
+        capture = cv2.VideoCapture(int(src), cv2.CAP_DSHOW)
+        if not capture.isOpened():
+            capture = cv2.VideoCapture(int(src))
+    else:
+        capture = cv2.VideoCapture(int(src) if is_camera else src)
     if not capture.isOpened():
         print(f"error: can't open {'camera ' if is_camera else ''}{src}", file=sys.stderr)
         return 2

@@ -49,32 +49,33 @@ interface Crop {
 }
 const FULL: Crop = { x0: 0, y0: 0, x1: 1, y1: 1 }
 const PROBE_WIDTH = 320
-const BAR_LUMA = 28 // a pixel darker than this counts as bar; covers pure black and "video black" (16)
-const LIT_SHARE = 0.25 // a column/row belongs to the picture when at least this share of it is lit
-const CROP_MEMORY = 5 // detections kept; the crop is their union, so one dark frame can't clip the picture
+const BAR_LUMA = 48 // a bar is no brighter than this (covers pure black and "video black")
+const BAR_SPREAD = 4 // ...and flat: its pixels sit within this of one value
+const BAR_SHARE = 0.8 // ...along at least this share of the column/row (a logo may cover the rest)
+const CROP_MEMORY = 5 // detections kept; the crop is their union, so one odd frame can't clip the picture
 
-/** Longest run of `true` in `on`, bridging gaps up to `gap` long. Returns [start, end). */
-function longestRun(on: boolean[], gap: number): [number, number] {
-  let best: [number, number] = [0, 0]
-  let start = -1
-  let last = -1
-  for (let i = 0; i <= on.length; i++) {
-    if (i < on.length && on[i]) {
-      if (start < 0) start = i
-      last = i
-    } else if (start >= 0 && (i === on.length || i - last > gap)) {
-      if (last + 1 - start > best[1] - best[0]) best = [start, last + 1]
-      start = -1
+/** Is this line of the frame (one column or row, as luma values 0..255 counted in `hist`) part of
+ *  a bar? Bars are flat, uniform dark fill. Real picture is not, even where the scene is dark: it
+ *  has texture and sensor noise. Judging by flatness (not darkness) keeps dark floors, clothes and
+ *  backgrounds from being trimmed away. */
+function isBar(hist: Uint32Array, total: number): boolean {
+  let median = 0
+  for (let v = 0, seen = 0; v < 256; v++) {
+    seen += hist[v]
+    if (seen * 2 >= total) {
+      median = v
+      break
     }
   }
-  return best
+  if (median > BAR_LUMA) return false
+  let near = 0
+  for (let v = Math.max(0, median - BAR_SPREAD); v <= Math.min(255, median + BAR_SPREAD); v++) near += hist[v]
+  return near >= total * BAR_SHARE
 }
 
 /** Webcam feeds are always landscape, so a phone standing upright arrives as a tall picture with
- *  dark bars either side (Camo does this). Finds the picture inside the bars so the page can show,
- *  and the model can get, just the vertical picture. A column counts as picture only when a good
- *  share of it is lit, so a logo or watermark sitting in a bar doesn't make the bar look like
- *  picture. Null = nothing found (no feed yet, or a very dark scene). */
+ *  flat dark bars either side (Camo does this). Finds the picture inside the bars so the page can
+ *  show, and the model can get, just the vertical picture. Null = nothing but bars (no feed yet). */
 function findPicture(el: HTMLVideoElement, canvas: HTMLCanvasElement): Crop | null {
   const w = PROBE_WIDTH
   const h = Math.max(1, Math.round((PROBE_WIDTH * el.videoHeight) / el.videoWidth))
@@ -84,40 +85,28 @@ function findPicture(el: HTMLVideoElement, canvas: HTMLCanvasElement): Crop | nu
   if (!ctx) return null
   ctx.drawImage(el, 0, 0, w, h)
   const px = ctx.getImageData(0, 0, w, h).data
-  const lit = new Uint8Array(w * h)
-  const cols = new Uint16Array(w)
-  for (let y = 0, i = 0, p = 0; y < h; y++) {
-    for (let x = 0; x < w; x++, i += 4, p++) {
-      if (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2] > BAR_LUMA) {
-        lit[p] = 1
-        cols[x]++
-      }
-    }
-  }
-  const [x0, x1] = longestRun(Array.from(cols, (n) => n / h >= LIT_SHARE), Math.ceil(w * 0.02))
-  if (x1 - x0 < w * 0.1) return null
-  const rows: boolean[] = []
-  for (let y = 0; y < h; y++) {
-    let n = 0
-    for (let x = x0; x < x1; x++) n += lit[y * w + x]
-    rows.push(n / (x1 - x0) >= LIT_SHARE)
-  }
-  const [y0, y1] = longestRun(rows, Math.ceil(h * 0.02))
-  if (y1 - y0 < h * 0.1) return null
-  return { x0: x0 / w, y0: y0 / h, x1: x1 / w, y1: y1 / h }
-}
+  const luma = new Uint8Array(w * h)
+  for (let p = 0, i = 0; p < luma.length; p++, i += 4) luma[p] = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2])
 
-const PORTRAIT = 9 / 16 // width / height of the view the page always shows
-
-/** The page always shows a vertical view. If the picture (bars already trimmed) is still wider than
- *  tall, keep its full height and take the centred 9:16 strip of it. */
-function toPortrait(c: Crop, vw: number, vh: number): Crop {
-  const pw = (c.x1 - c.x0) * vw
-  const ph = (c.y1 - c.y0) * vh
-  if (pw <= ph) return c
-  const half = (ph * PORTRAIT) / vw / 2
-  const mid = (c.x0 + c.x1) / 2
-  return { ...c, x0: mid - half, x1: mid + half }
+  // Count bar columns inwards from each edge. Only the sides are ever trimmed: an upright phone in
+  // a wide frame gets bars left and right, never top and bottom, so the full height (head to chair
+  // base) is always kept.
+  const hist = new Uint32Array(256)
+  const barAt = (x: number): boolean => {
+    hist.fill(0)
+    for (let y = 0; y < h; y++) hist[luma[y * w + x]]++
+    return isBar(hist, h)
+  }
+  let left = 0
+  while (left < w && barAt(left)) left++
+  if (left === w) return null
+  let right = 0
+  while (barAt(w - 1 - right)) right++
+  // The picture sits centred between equal bars. Trust the narrower side for both, so a dark edge
+  // of the real picture (a dark wall, say) is never mistaken for more bar.
+  const bar = Math.min(left, right)
+  if (w - 2 * bar < w * 0.1) return null
+  return { x0: bar / w, y0: 0, x1: 1 - bar / w, y1: 1 }
 }
 
 export default function Camera() {
@@ -172,7 +161,10 @@ export default function Camera() {
       stop()
       try {
         if (!navigator.mediaDevices) throw new Error('no mediaDevices')
-        const video: MediaTrackConstraints = { width: { ideal: 1280 }, height: { ideal: 720 } }
+        // Take the camera's frame exactly as it sends it, so the page has the same shape as Camo.
+        // Asking for a size (1280x720, say) makes the browser crop a vertical feed to fit it;
+        // resizeMode 'none' tells the browser not to crop or rescale at all.
+        const video: MediaTrackConstraints = { resizeMode: 'none' } as MediaTrackConstraints
         if (id) video.deviceId = { exact: id }
         let stream: MediaStream
         try {
@@ -245,7 +237,7 @@ export default function Camera() {
         const picture: Crop = seen.length
           ? { x0: Math.min(...seen.map((s) => s.x0)), y0: Math.min(...seen.map((s) => s.y0)), x1: Math.max(...seen.map((s) => s.x1)), y1: Math.max(...seen.map((s) => s.y1)) }
           : FULL
-        const c = toPortrait(picture, el.videoWidth, el.videoHeight)
+        const c = picture
         setCrop((p) => (Math.max(Math.abs(p.x0 - c.x0), Math.abs(p.y0 - c.y0), Math.abs(p.x1 - c.x1), Math.abs(p.y1 - c.y1)) > 0.004 ? c : p))
 
         const sx = c.x0 * el.videoWidth
@@ -346,8 +338,7 @@ export default function Camera() {
   // phone shows as a tall portrait view. (cw x ch) is that picture in feed pixels.
   const vw = info?.w || 16
   const vh = info?.h || 9
-  // Before the first frame is measured, assume a landscape feed and show the centred portrait strip.
-  const shown = running ? crop : toPortrait(crop, vw, vh)
+  const shown = crop
   const fx = shown.x1 - shown.x0
   const fy = shown.y1 - shown.y0
   const cw = Math.round(vw * fx)
@@ -412,7 +403,7 @@ export default function Camera() {
             )}
           </div>
           <p className="mt-3 text-xs text-ink-2">
-            Black picture from Camo? Keep Camo Studio open with the phone connected. The view is always vertical: black bars are trimmed, and a wide picture is cropped to its centre.
+            Black picture from Camo? Keep Camo Studio open with the phone connected. The view has the same shape as the picture Camo sends; black bars at the sides are trimmed.
           </p>
         </Card>
 

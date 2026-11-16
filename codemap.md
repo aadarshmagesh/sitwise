@@ -156,7 +156,7 @@ separate server-side, per-request opt-in. See [docs](docs/README.md) for setup.
 | `scripts/check_codemap.py` | check codemap |
 | `scripts/gen_vapid.py` | gen vapid |
 | `scripts/init_db.py` | init db |
-| `scripts/model_server.py` | Local model HTTP server on port 5002 |
+| `scripts/model_server.py` | Local model HTTP server on port 5002; called by the dev proxy and directly by the hosted Camera page (origin allowlist) |
 | `scripts/posture_model.py` | posture model |
 | `scripts/requirements-model.txt` | requirements model |
 | `scripts/seed.py` | seed |
@@ -203,7 +203,7 @@ separate server-side, per-request opt-in. See [docs](docs/README.md) for setup.
 | `web/src/hooks.ts` | hooks |
 | `web/src/index.css` | index |
 | `web/src/main.tsx` | main |
-| `web/src/model.ts` | model |
+| `web/src/model.ts` | Picks the Camera page's model: local Python model server (dev proxy, or 127.0.0.1:5002 from the hosted site), else the stub |
 | `web/src/pages/Analytics.tsx` | Dashboard page: Analytics |
 | `web/src/pages/Camera.tsx` | Local camera feed and model integration |
 | `web/src/pages/Coach.tsx` | Dashboard page: Coach |

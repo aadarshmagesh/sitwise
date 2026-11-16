@@ -7,8 +7,9 @@
 //   * `pythonModel`: sends the frame to scripts/model_server.py on THIS computer (127.0.0.1), which
 //     runs the real model (the teammate's MediaPipe pipeline, via scripts/posture_model.py) with the
 //     facing direction and the user's goal posture. Used whenever that server is running.
-//   * `stubModel`: fixed mock data from the API, used otherwise (and on the hosted site, where no
-//     local server exists; the hosted API takes no images).
+//     On the hosted site too: the page talks straight to 127.0.0.1:5002 on the visitor's own computer.
+//   * `stubModel`: fixed mock data from the API, used when no model server is running on this
+//     computer (the hosted API takes no images).
 import { api } from './api'
 import type { PostureFeatures, PostureLabel } from './types'
 
@@ -49,8 +50,13 @@ export interface PostureModel {
 /** Frames are downscaled so their longest side is this many pixels before the model sees them. */
 export const FRAME_MAX_SIDE = 640
 
-/** Vite proxies this to scripts/model_server.py (web/vite.config.ts). */
-const LOCAL_MODEL = `${import.meta.env.BASE_URL}local-model`
+/** Where scripts/model_server.py can be reached, tried in order when the camera starts:
+ *  1. the dev proxy (Vite forwards /local-model to it, web/vite.config.ts);
+ *  2. straight to this computer. That is how the HOSTED site uses the model: the page is served from
+ *     the internet, but the frame still only travels from this browser tab to 127.0.0.1. The model
+ *     server allows it for the site's origin only (CORS, scripts/model_server.py). */
+const LOCAL_MODEL_URLS = [`${import.meta.env.BASE_URL}local-model`, 'http://127.0.0.1:5002']
+let localModel = LOCAL_MODEL_URLS[0]
 
 /** Ignores the frame and returns the server's fixed mock reading (/model/analyze). */
 export const stubModel: PostureModel = {
@@ -79,7 +85,7 @@ export const pythonModel: PostureModel = {
     if (opts?.goal != null) query.set('goal', String(opts.goal))
     let res: Response
     try {
-      res = await fetch(`${LOCAL_MODEL}/analyze?${query}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: await toJpeg(frame) })
+      res = await fetch(`${localModel}/analyze?${query}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: await toJpeg(frame) })
     } catch {
       throw new Error("Can't reach the local model server. Is `python scripts/model_server.py` still running?")
     }
@@ -91,16 +97,21 @@ export const pythonModel: PostureModel = {
   },
 }
 
-/** Is scripts/model_server.py up? Returns its model's name, or null. */
+/** Is scripts/model_server.py up? Returns its model's name (and remembers where it answered), or null. */
 async function probeLocalModel(): Promise<string | null> {
-  try {
-    const res = await fetch(`${LOCAL_MODEL}/health`)
-    if (!res.ok) return null
-    const h = (await res.json()) as { ready?: boolean; name?: string }
-    return h.ready ? (h.name ?? 'unnamed') : null
-  } catch {
-    return null // not running, or (hosted site) the path served HTML instead of JSON
+  for (const url of LOCAL_MODEL_URLS) {
+    try {
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) continue
+      const h = (await res.json()) as { ready?: boolean; name?: string }
+      if (!h.ready) continue
+      localModel = url
+      return h.name ?? 'unnamed'
+    } catch {
+      // not there: on the hosted site the first path serves HTML, and a stopped server refuses the second
+    }
   }
+  return null
 }
 
 let active: PostureModel = stubModel

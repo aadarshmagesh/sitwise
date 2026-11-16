@@ -155,6 +155,21 @@ here while a browser tab is using it, so stop the camera on the page first.
 | You do not fit head to chair base | Move the phone further back. The page can only show what the phone sees. |
 | `flask` is not recognised | Use `python -m flask …` as above, with the venv active. |
 
+## Using the live site (fixsit.health) with the real model
+
+The hosted Camera page can use the model too, because the model server runs on your own computer:
+
+1. Start the model server as in step 3 (`scripts/model_server.py`, port 5002). The API and the local dashboard are not needed.
+2. Open <https://fixsit.health/camera> in Chrome or Edge **on the same computer** and click **Start camera**. If the
+   browser asks to let the site reach devices or apps on your local network, allow it.
+3. **Model reading** should name the real model. If it says `Stub (fixed mock data)`, the model server isn't running or
+   the browser blocked the request: check the server's terminal, then stop and start the camera.
+
+The page calls `http://127.0.0.1:5002` directly, so frames still go no further than your computer. The model server
+only answers pages from `https://fixsit.health` and local dev (`ALLOWED_ORIGINS` in `scripts/model_server.py`; add
+others with the `MODEL_ALLOWED_ORIGINS` environment variable). Use either this page or `python -m bridge`
+([`model-bridge.md`](model-bridge.md)), not both: they share one camera and one device pairing.
+
 ## Privacy
 
 Frames go from the browser tab to the model server on the same computer (`127.0.0.1`), are analysed

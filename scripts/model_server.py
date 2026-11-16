@@ -9,6 +9,11 @@ The Camera page finds it automatically (Vite proxies /local-model here) and fall
 stub when it isn't running. The model itself sits behind scripts/posture_model.py (the teammate's
 MediaPipe pipeline through bridge/engine.py). With any other Python it serves a placeholder and says why.
 
+The HOSTED dashboard uses it too: its Camera page (in a browser on this computer) calls
+http://127.0.0.1:5002 directly, so the real model runs for the live site while the frames still go
+no further than this machine. Only the origins in ALLOWED_ORIGINS may do that (add more with
+MODEL_ALLOWED_ORIGINS=https://a.example,https://b.example).
+
 Privacy: this listens on 127.0.0.1 only, so frames never leave this computer. Each frame is
 decoded in memory, passed to the model and dropped; nothing is written to disk or logged. The
 hosted API (api/) still accepts no images, by design.
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import threading
 import time
 
@@ -32,6 +38,34 @@ MAX_FRAME_BYTES = 4 * 1024 * 1024
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_FRAME_BYTES
 _lock = threading.Lock()   # one inference at a time; PyTorch models aren't re-entrant by default
+
+# Web pages allowed to call this server from the browser: the hosted dashboard and local dev.
+# Any other site is refused, so a random page can't push images at the model or read its answers.
+ALLOWED_ORIGINS = {"https://fixsit.health", "https://www.fixsit.health",
+                   "http://localhost:5173", "http://127.0.0.1:5173"}
+ALLOWED_ORIGINS |= {o.strip().rstrip("/") for o in os.environ.get("MODEL_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+
+
+@app.before_request
+def _refuse_other_sites():
+    origin = request.headers.get("Origin")
+    if origin and origin not in ALLOWED_ORIGINS:
+        return jsonify(error=f"Origin {origin} is not allowed to use this model server"), 403
+
+
+@app.after_request
+def _cors(resp):
+    """Let the allowed pages read the answer. The Private-Network header covers browsers that ask
+    before letting a public site talk to this computer."""
+    origin = request.headers.get("Origin")
+    if origin in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+        resp.headers["Access-Control-Max-Age"] = "600"
+    return resp
 
 
 def _num(v, lo: float, hi: float, default: float) -> float:

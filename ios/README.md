@@ -66,7 +66,7 @@ cd web; npm run dev                                                             
 
 Then open **Camera**, choose which way you face, turn on **Send readings to the dashboard**, and use
 **Set my goal posture**. No phone and no Camo? `python scripts\simulate.py --code <PAIRING_CODE> --loop` fakes
-the phone's readings ([root README](../README.md#simulate-the-phone)).
+the phone's readings ([root README](../docs/configuration.md#simulate-the-phone)).
 
 ### A real iPhone talking to an API on your Windows laptop
 

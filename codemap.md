@@ -118,6 +118,7 @@ separate server-side, per-request opt-in. See [docs](docs/README.md) for setup.
 | `docs/README.md` | Documentation: README |
 | `docs/api.md` | Documentation: api |
 | `docs/camera-setup.md` | Documentation: camera setup |
+| `docs/configuration.md` | Documentation: setup, configuration, deploy, troubleshooting |
 | `docs/demo-script.md` | Documentation: demo script |
 | `docs/hardware.md` | Documentation: hardware |
 | `docs/health-claims.md` | Documentation: health claims |

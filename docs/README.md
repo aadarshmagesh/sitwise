@@ -1,9 +1,10 @@
 # Documentation
 
-Start with the root [README](../README.md) for API and dashboard setup.
+Start with the root [README](../README.md) for the overview and [Setup and configuration](configuration.md) for running it.
 
 | Task | Guide |
 |---|---|
+| Install, configure, deploy, troubleshoot | [Setup and configuration](configuration.md) |
 | Run the real model with the dashboard camera | [Camera setup](camera-setup.md) |
 | Receive posture alerts on another iPhone | [iPhone alerts](iphone-alerts.md) |
 | Run the model directly against a webcam | [Model bridge](model-bridge.md) |
